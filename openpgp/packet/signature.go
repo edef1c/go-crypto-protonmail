@@ -636,7 +636,8 @@ func (sig *Signature) Sign(h hash.Hash, priv *PrivateKey, config *Config) (err e
 	switch priv.PubKeyAlgo {
 	case PubKeyAlgoRSA, PubKeyAlgoRSASignOnly:
 		// supports both *rsa.PrivateKey and crypto.Signer
-		sigdata, err := priv.PrivateKey.(crypto.Signer).Sign(config.Random(), digest, sig.Hash)
+		var sigdata []byte
+		sigdata, err = priv.PrivateKey.(crypto.Signer).Sign(config.Random(), digest, sig.Hash)
 		if err == nil {
 			sig.RSASignature = encoding.NewMPI(sigdata)
 		}
@@ -648,7 +649,8 @@ func (sig *Signature) Sign(h hash.Hash, priv *PrivateKey, config *Config) (err e
 		if len(digest) > subgroupSize {
 			digest = digest[:subgroupSize]
 		}
-		r, s, err := dsa.Sign(config.Random(), dsaPriv, digest)
+		var r, s *big.Int
+		r, s, err = dsa.Sign(config.Random(), dsaPriv, digest)
 		if err == nil {
 			sig.DSASigR = new(encoding.MPI).SetBig(r)
 			sig.DSASigS = new(encoding.MPI).SetBig(s)
@@ -670,7 +672,8 @@ func (sig *Signature) Sign(h hash.Hash, priv *PrivateKey, config *Config) (err e
 			sig.ECDSASigS = new(encoding.MPI).SetBig(s)
 		}
 	case PubKeyAlgoEdDSA:
-		sigdata, err := priv.PrivateKey.(crypto.Signer).Sign(config.Random(), digest, crypto.Hash(0))
+		var sigdata []byte
+		sigdata, err = priv.PrivateKey.(crypto.Signer).Sign(config.Random(), digest, crypto.Hash(0))
 		if err == nil {
 			sig.EdDSASigR = encoding.NewMPI(sigdata[:32])
 			sig.EdDSASigS = encoding.NewMPI(sigdata[32:])
