@@ -619,10 +619,11 @@ func (sig *Signature) signPrepareHash(h hash.Hash) (digest []byte, err error) {
 // the hash of the message to be signed and will be mutated by this function.
 // On success, the signature is stored in sig. Call Serialize to write it out.
 // If config is nil, sensible defaults will be used.
-func (sig *Signature) Sign(h hash.Hash, priv *PrivateKey, config *Config) (err error) {
+func (sig *Signature) Sign(h hash.Hash, priv *PrivateKey, config *Config) error {
 	if priv.Dummy() {
 		return errors.ErrDummyPrivateKey("dummy key found")
 	}
+	var err error
 	sig.Version = priv.PublicKey.Version
 	sig.IssuerFingerprint = priv.PublicKey.Fingerprint
 	sig.outSubpackets, err = sig.buildSubpackets(priv.PublicKey)
@@ -631,16 +632,16 @@ func (sig *Signature) Sign(h hash.Hash, priv *PrivateKey, config *Config) (err e
 	}
 	digest, err := sig.signPrepareHash(h)
 	if err != nil {
-		return
+		return err
 	}
 	switch priv.PubKeyAlgo {
 	case PubKeyAlgoRSA, PubKeyAlgoRSASignOnly:
 		// supports both *rsa.PrivateKey and crypto.Signer
-		var sigdata []byte
-		sigdata, err = priv.PrivateKey.(crypto.Signer).Sign(config.Random(), digest, sig.Hash)
-		if err == nil {
-			sig.RSASignature = encoding.NewMPI(sigdata)
+		sigdata, err := priv.PrivateKey.(crypto.Signer).Sign(config.Random(), digest, sig.Hash)
+		if err != nil {
+			return err
 		}
+		sig.RSASignature = encoding.NewMPI(sigdata)
 	case PubKeyAlgoDSA:
 		dsaPriv := priv.PrivateKey.(*dsa.PrivateKey)
 
@@ -649,40 +650,44 @@ func (sig *Signature) Sign(h hash.Hash, priv *PrivateKey, config *Config) (err e
 		if len(digest) > subgroupSize {
 			digest = digest[:subgroupSize]
 		}
-		var r, s *big.Int
-		r, s, err = dsa.Sign(config.Random(), dsaPriv, digest)
-		if err == nil {
-			sig.DSASigR = new(encoding.MPI).SetBig(r)
-			sig.DSASigS = new(encoding.MPI).SetBig(s)
+		r, s, err := dsa.Sign(config.Random(), dsaPriv, digest)
+		if err != nil {
+			return err
 		}
+		sig.DSASigR = new(encoding.MPI).SetBig(r)
+		sig.DSASigS = new(encoding.MPI).SetBig(s)
 	case PubKeyAlgoECDSA:
 		var r, s *big.Int
 		if pk, ok := priv.PrivateKey.(*ecdsa.PrivateKey); ok {
 			// direct support, avoid asn1 wrapping/unwrapping
 			r, s, err = ecdsa.Sign(config.Random(), pk, digest)
+			if err != nil {
+				return err
+			}
 		} else {
-			var b []byte
-			b, err = priv.PrivateKey.(crypto.Signer).Sign(config.Random(), digest, sig.Hash)
-			if err == nil {
-				r, s, err = unwrapECDSASig(b)
+			b, err := priv.PrivateKey.(crypto.Signer).Sign(config.Random(), digest, sig.Hash)
+			if err != nil {
+				return err
+			}
+			r, s, err = unwrapECDSASig(b)
+			if err != nil {
+				return err
 			}
 		}
-		if err == nil {
-			sig.ECDSASigR = new(encoding.MPI).SetBig(r)
-			sig.ECDSASigS = new(encoding.MPI).SetBig(s)
-		}
+		sig.ECDSASigR = new(encoding.MPI).SetBig(r)
+		sig.ECDSASigS = new(encoding.MPI).SetBig(s)
 	case PubKeyAlgoEdDSA:
-		var sigdata []byte
-		sigdata, err = priv.PrivateKey.(crypto.Signer).Sign(config.Random(), digest, crypto.Hash(0))
-		if err == nil {
-			sig.EdDSASigR = encoding.NewMPI(sigdata[:32])
-			sig.EdDSASigS = encoding.NewMPI(sigdata[32:])
+		sigdata, err := priv.PrivateKey.(crypto.Signer).Sign(config.Random(), digest, crypto.Hash(0))
+		if err != nil {
+			return err
 		}
+		sig.EdDSASigR = encoding.NewMPI(sigdata[:32])
+		sig.EdDSASigS = encoding.NewMPI(sigdata[32:])
 	default:
-		err = errors.UnsupportedError("public key algorithm: " + strconv.Itoa(int(sig.PubKeyAlgo)))
+		return errors.UnsupportedError("public key algorithm: " + strconv.Itoa(int(sig.PubKeyAlgo)))
 	}
 
-	return
+	return nil
 }
 
 // unwrapECDSASig parses the two integer components of an ASN.1-encoded ECDSA
